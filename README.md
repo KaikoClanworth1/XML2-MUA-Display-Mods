@@ -33,6 +33,21 @@ fully reversible (automatic backups in `_resmod_backups\`).
 
 ---
 
+## Requirements
+
+- **Windows 10 or 11** with **Windows PowerShell 5.1** — both are included with the OS, nothing to install.
+- The scripts use **.NET Framework 4.x** components (`System.Windows.Forms` for the screen size, and a
+  tiny inline P/Invoke for window positioning on MUA). **.NET Framework 4.x ships with Windows 10/11**
+  (Windows PowerShell 5.1 itself runs on it), so it's already present.
+- You do **NOT** need the optional **".NET Framework 3.5"** Windows feature — that's a different,
+  legacy runtime these scripts don't use. No "Turn Windows features on/off" step is required.
+- If .NET is somehow unavailable (e.g. a heavily stripped Windows / Server Core), the **core mode
+  switching still works** — only MUA's auto-centering is skipped, with a notice.
+- The `.cmd` shortcuts run PowerShell with `-ExecutionPolicy Bypass`, so you don't need to change any
+  system execution policy.
+
+---
+
 ## Install & use
 
 Copy your game's folder contents next to its EXE, then double-click a `Display - *.cmd`

@@ -142,13 +142,19 @@ function Get-CurrentMode {
 function Position-GameWindow([string]$mode, [int]$W, [int]$H) {
     if ($mode -eq 'fullscreen' -or $mode -eq 'unknown') { return }
     if (-not ('MuaW32' -as [type])) {
-        Add-Type @"
+        try {
+            Add-Type -ErrorAction Stop -TypeDefinition @"
 using System; using System.Runtime.InteropServices;
 public class MuaW32 {
   [DllImport("user32.dll", SetLastError=true)] public static extern IntPtr FindWindow(string c, string n);
   [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr a, int x, int y, int cx, int cy, uint f);
 }
 "@
+        } catch {
+            Write-Host "  (skipping auto-position: couldn't load the window helper - needs the .NET Framework C# compiler." -ForegroundColor DarkYellow
+            Write-Host "   The mode/patches are applied; the game just won't be auto-centered.)" -ForegroundColor DarkYellow
+            return
+        }
     }
     $desk = Get-DesktopResolution
     Write-Host "Waiting for the game window to position it ($mode)..." -ForegroundColor DarkGray
