@@ -1,0 +1,29 @@
+# This repo must never contain game files or personal backups.
+# Belt-and-suspenders ignores in case someone develops inside their game folder:
+
+_resmod_backups/
+*.orig
+
+# Game / engine / wrapper binaries (copyrighted — never commit)
+XMen2*.exe
+*.dll
+*.igb
+*.engb
+*.xmlb
+*.pkgb
+*.boyb
+*.navb
+*.chrb
+dgVoodoo*.conf
+dgVoodoo*.exe
+alchemy.ini
+xmen.ini
+build.ini
+
+# Python / editor noise
+__pycache__/
+*.pyc
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
