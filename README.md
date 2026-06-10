@@ -86,6 +86,7 @@ all three so they stay consistent:
 | **Render resolution** (both modes) | The **game** | Reads registry `HKCU\Software\Activision\X-Men Legends 2\Settings\Display\Resolution` (REG_SZ `"WxH"`) **unconditionally** at startup and renders natively at that size. dgVoodoo just passes the size through → sharp, **not** an upscale. |
 | **Windowed vs fullscreen** | **dgVoodoo** | The game is hardcoded to demand exclusive fullscreen, so we set `[DirectX] AppControlledScreenMode=false` + `[General] FullScreenMode=false`, which makes dgVoodoo **override** the request and present in a desktop window. The game never knows. |
 | **Title bar / border / centering** | a 4‑byte **patch** + dgVoodoo | The game builds its window with a borderless `WS_POPUP` style pinned to (0,0). For windowed mode the tool patches that style in `libIGDisplay.dll` to a titled, non‑resizable style and sets dgVoodoo `CenterAppWindow=true`. Borderless mode uses dgVoodoo `WindowedAttributes=borderless,fullscreensize`. |
+| **Stay open when unfocused** | two 1‑byte **patches** | Because the game thinks it's fullscreen, its `WM_ACTIVATE`/`WM_ACTIVATEAPP` handlers minimize/release the display when you click away. The tool flips the two `je` guards (`74`→`EB`) in `libIGDisplay.dll` so those handlers do nothing — the window keeps running. Applied for windowed/borderless, restored for exclusive fullscreen. |
 
 ### Why this split?
 

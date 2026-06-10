@@ -122,6 +122,29 @@ function Set-WindowBorder([bool]$Bordered) {
     [System.IO.File]::WriteAllBytes($dll, $bytes)
 }
 
+# Because the game's window is flagged fullscreen, its WM_ACTIVATE / WM_ACTIVATEAPP handlers run the
+# fullscreen "minimize / release display on focus loss" path (libIGDisplay 0x10005c90 / 0x10005cb0, both
+# gated on the fullscreen byte [esi+0x46]). That makes a forced window minimize when you click away.
+# Each handler skips that path with a `je` (74) that we flip to an unconditional `jmp` (EB) so it always
+# returns and does nothing. $Enable=$true => stay open (EB); $false => stock fullscreen behavior (74).
+function Set-StayOpenOnFocusLoss([bool]$Enable) {
+    $dll = Join-Path $GameDir 'libIGDisplay.dll'
+    if (-not (Test-Path $dll)) { Write-Host "  (libIGDisplay.dll not found - skipping focus patch)" -ForegroundColor DarkYellow; return }
+    if (-not (Test-Path $BackupDir)) { New-Item -ItemType Directory -Path $BackupDir | Out-Null }
+    $dst = Join-Path $BackupDir 'libIGDisplay.dll.orig'
+    if (-not (Test-Path $dst)) { Copy-Item $dll $dst; Write-Host "  backed up libIGDisplay.dll -> _resmod_backups\libIGDisplay.dll.orig" -ForegroundColor DarkGray }
+    $bytes = [System.IO.File]::ReadAllBytes($dll)
+    $offsets = @(0x5c9e, 0x5cbe)   # the two `je` in the WM_ACTIVATE / WM_ACTIVATEAPP workers
+    foreach ($o in $offsets) {
+        if ($bytes[$o] -ne 0x74 -and $bytes[$o] -ne 0xEB) {
+            throw ("libIGDisplay.dll: unexpected byte at 0x{0:x} (0x{1:x2}) - aborting focus patch" -f $o,$bytes[$o])
+        }
+    }
+    $val = if ($Enable) { 0xEB } else { 0x74 }
+    foreach ($o in $offsets) { $bytes[$o] = $val }
+    [System.IO.File]::WriteAllBytes($dll, $bytes)
+}
+
 function Show-Status {
     Write-Host "=== XML2 display status ===" -ForegroundColor Cyan
     if (Test-Path $Alchemy) {
@@ -153,7 +176,9 @@ function Show-Status {
     if (Test-Path $dll) {
         $b = [System.IO.File]::ReadAllBytes($dll)
         $style = if ($b[0x580b] -eq 0xCA -and $b[0x580c] -eq 0x06) { 'bordered/titled (0x06CA0000)' } elseif ($b[0x580c] -eq 0x85) { 'borderless WS_POPUP (0x85000000, stock)' } else { 'unknown' }
+        $focus = if ($b[0x5c9e] -eq 0xEB) { 'stays open when unfocused (patched)' } elseif ($b[0x5c9e] -eq 0x74) { 'minimizes on focus loss (stock fullscreen)' } else { 'unknown' }
         Write-Host ("  libIGDisplay: window style = {0}" -f $style)
+        Write-Host ("                focus loss  = {0}" -f $focus)
     }
     $desk = Get-DesktopResolution
     Write-Host ("  desktop     : {0}x{1}" -f $desk.W, $desk.H) -ForegroundColor DarkGray
@@ -204,8 +229,9 @@ switch ($Mode) {
         Set-DgVoodooAttr 'FullscreenAttributes'    'fake'   # harmless
         Set-DgVoodooAttr 'CenterAppWindow'         'true'   # un-stick from top-left (game hardcodes pos 0,0)
         Set-WindowBorder $true                              # patch libIGDisplay style -> titled, movable window
+        Set-StayOpenOnFocusLoss $true                       # don't minimize/freeze when you click another window
         Set-Resolution $Width $Height
-        Write-Host "-> WINDOWED: a ${Width}x${Height} titled, centered, movable window." -ForegroundColor Green
+        Write-Host "-> WINDOWED: a ${Width}x${Height} titled, centered window that stays open when unfocused." -ForegroundColor Green
         if ($Width -ge $desk.W -or $Height -ge $desk.H) {
             Write-Host "   (Tip: window is at/above desktop size; use a smaller -Width/-Height or 'borderless' instead.)" -ForegroundColor DarkYellow
         }
@@ -219,6 +245,7 @@ switch ($Mode) {
         Set-DgVoodooAttr 'FullscreenAttributes'    'fake'
         Set-DgVoodooAttr 'CenterAppWindow'         'false'
         Set-WindowBorder $false                             # restore borderless game window style
+        Set-StayOpenOnFocusLoss $true                       # Alt-Tab friendly: don't minimize on focus loss
         Set-Resolution $Width $Height
         Write-Host "-> BORDERLESS FULLSCREEN at ${Width}x${Height} (Alt-Tab friendly, no exclusive mode)." -ForegroundColor Green
     }
@@ -231,6 +258,7 @@ switch ($Mode) {
         Set-DgVoodooAttr 'WindowedAttributes'      ''
         Set-DgVoodooAttr 'CenterAppWindow'         'false'
         Set-WindowBorder $false                             # restore borderless WS_POPUP for exclusive FS
+        Set-StayOpenOnFocusLoss $false                      # stock fullscreen focus handling (minimize on Alt-Tab)
         Set-Resolution $Width $Height
         Write-Host "-> EXCLUSIVE FULLSCREEN at ${Width}x${Height} (must be a mode your GPU enumerates)." -ForegroundColor Green
         Write-Host "   (If it black-screens, that resolution isn't enumerated - use -AddMenuResolutions or 'borderless'.)" -ForegroundColor DarkYellow
