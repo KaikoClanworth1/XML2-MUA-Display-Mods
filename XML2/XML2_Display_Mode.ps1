@@ -229,7 +229,22 @@ function Show-Status {
     Write-Host ("  desktop     : {0}x{1}" -f $desk.W, $desk.H) -ForegroundColor DarkGray
 }
 
+# Warn (with install link) if .NET Framework 4.x isn't present. PowerShell 5.1 needs it too, so this
+# normally passes on Win10/11; it's here for older/stripped Windows where it may be missing.
+function Test-DotNet4 {
+    $rel = 0
+    try { $rel = [int](Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full' -ErrorAction Stop).Release } catch {}
+    if (-not $rel -or $rel -lt 378389) {
+        Write-Host "WARNING: .NET Framework 4.x was not detected on this PC." -ForegroundColor Red
+        Write-Host "  Install '.NET Framework 4.8' (free):  https://dotnet.microsoft.com/download/dotnet-framework/net48" -ForegroundColor Cyan
+        Write-Host "  ...or enable '.NET Framework 4.x' via OptionalFeatures.exe, then re-run." -ForegroundColor Yellow
+        Write-Host "  (Patches still apply; screen-size detection falls back to 1920x1080.)" -ForegroundColor DarkYellow
+        Write-Host ""
+    }
+}
+
 # ---------------------------------------------------------------------------
+Test-DotNet4
 if ($Revert) {
     foreach ($f in @($Alchemy, $DgVoodoo, (Join-Path $GameDir 'libIGDisplay.dll'), (Join-Path $GameDir 'libIGGfx.dll'))) {
         $name = Split-Path $f -Leaf

@@ -35,16 +35,24 @@ fully reversible (automatic backups in `_resmod_backups\`).
 
 ## Requirements
 
-- **Windows 10 or 11** with **Windows PowerShell 5.1** — both are included with the OS, nothing to install.
-- The scripts use **.NET Framework 4.x** components (`System.Windows.Forms` for the screen size, and a
-  tiny inline P/Invoke for window positioning on MUA). **.NET Framework 4.x ships with Windows 10/11**
-  (Windows PowerShell 5.1 itself runs on it), so it's already present.
-- You do **NOT** need the optional **".NET Framework 3.5"** Windows feature — that's a different,
-  legacy runtime these scripts don't use. No "Turn Windows features on/off" step is required.
-- If .NET is somehow unavailable (e.g. a heavily stripped Windows / Server Core), the **core mode
-  switching still works** — only MUA's auto-centering is skipped, with a notice.
-- The `.cmd` shortcuts run PowerShell with `-ExecutionPolicy Bypass`, so you don't need to change any
-  system execution policy.
+These tools need **Windows PowerShell 5.1** (the built-in `powershell`) and **.NET Framework 4.x**.
+On most **Windows 10 / 11** machines both are already present and it just works. But .NET 4.x is
+**not guaranteed** on older Windows (7 / 8.1), LTSC/"debloated" images, or some server installs — so
+if a script stops with **".NET Framework 4.x was not detected"**, install or enable it:
+
+**Install (easiest):** download **.NET Framework 4.8** (free, from Microsoft) and run it:
+  → https://dotnet.microsoft.com/download/dotnet-framework/net48
+
+**…or enable it via Windows:** press `Win+R`, run `OptionalFeatures.exe`, tick
+**".NET Framework 4.x"**, click OK (Windows may download it). Reboot if asked.
+
+**Windows 7 / 8.1:** also install **Windows Management Framework 5.1** to get PowerShell 5.1.
+
+Notes:
+- You do **NOT** need the separate **".NET Framework 3.5"** feature — different runtime, not used here.
+- If .NET is missing, the scripts tell you (with this link); the **core mode switching still applies**,
+  only MUA's auto-window-centering is skipped.
+- The `.cmd` shortcuts already run PowerShell with `-ExecutionPolicy Bypass` — no policy change needed.
 
 ---
 
