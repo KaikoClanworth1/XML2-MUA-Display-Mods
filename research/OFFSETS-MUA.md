@@ -60,18 +60,31 @@ flag stays set, the window is built with the fullscreen `WS_POPUP` style at (0,0
   (GFX config) defaults to 0. The exclusive device is produced downstream, which is exactly
   what the libIGGfx/libIGDisplay patches override.
 
-## Framing — via bundled dgVoodoo2 (D3D9 wrapper)
+## Cursor — Game.exe (NOT a wrapper)
 
-MUA is native D3D9 but the switcher now routes it through the **bundled dgVoodoo2** (drop
-`D3D9.dll` into the game folder via `Install-dgVoodoo.ps1`; MUA's `LoadLibrary("d3d9.dll")`
-picks up the local wrapper). dgVoodoo then provides what it does for XML2:
-`CenterAppWindow` (centering), `WindowedAttributes=borderless,fullscreensize` (borderless),
-`CaptureMouse=false` / `FreeMouse=true` (free cursor). The windowed-device patch above still
-runs underneath so the device is genuinely windowed (no exclusive-fullscreen minimize).
+MUA stays **native D3D9** (dgVoodoo was tried and it *reintroduced* the focus-loss minimize +
+mouse-lock, so it is NOT used for MUA). The cursor behavior the user sees is all in **Game.exe**,
+which imports `ClipCursor`/`ShowCursor`/`SetCapture` and manages the cursor itself — the
+`libIGDisplay` patches can't reach it. Patches (file = VA − 0x400000):
 
-This **retires** the two earlier no-dgVoodoo workarounds: the PowerShell `SetWindowPos`
-window-mover, and the `ShowCursor(FALSE)->TRUE` flip at libIGDisplay file `0x4021` (the
-switcher resets that byte to `00` if a previous version applied it).
+| Purpose | VA | File off | Original | Patched |
+|---|---|---|---|---|
+| **Free the cursor** — NOP the per-frame `push edx; call ClipCursor(&rect)` confine (input loop `0x416010`) | `0x416120` | `0x16120` | `52 FF 15 54 83 79 00` | `90 ×7` |
+| **Show cursor** — device-init `ShowCursor(0)`→`(1)` | `0x71fd9a` | `0x31fd9b` | `00` | `01` |
+| **Show cursor** — NOP startup `push ebx; call esi`(=ShowCursor 0) | `0x4193f3` | `0x193f3` | `53 FF D6` | `90 90 90` |
+| **Show cursor** — NOP startup `push ebx; call esi` | `0x419417` | `0x19417` | `53 FF D6` | `90 90 90` |
+
+Left intact on purpose: `SetCapture` (`0x71ddac`, per-click drag), the inactive-branch
+`ClipCursor(NULL)` release (`0x41609e`), and `ShowCursor(1)` before error dialogs.
+
+**Minimize** is *not* a Game.exe call (its only `ShowWindow` is `SW_RESTORE` single-instance focus);
+it's D3D9 exclusive-fullscreen auto-minimize, which the **windowed-device patch above** prevents.
+
+## Window placement (no wrapper)
+
+With `-Launch`, the switcher finds the window (class `igWin32WindowClass`) and **moves** it
+(borderless → top-left/fill, windowed → centered) — move only, never resize, to avoid desyncing
+the D3D9 back-buffer.
 
 Still flagged for runtime testing: a `Reset()` or the in-game resolution menu
 (`changeResolutionAccepted/Refused`) may rebuild the device — set resolution via the switcher

@@ -7,11 +7,12 @@ Alchemy-engine action-RPGs:
 | Game | Files | Renderer | dgVoodoo? |
 |---|---|---|---|
 | **X-Men Legends II** (2005) | [`XML2/`](XML2/) | D3D8 → dgVoodoo2 | required |
-| **Marvel Ultimate Alliance** (2006) | [`MUA/`](MUA/) | D3D9 → dgVoodoo2 | bundled (auto-install) |
+| **Marvel Ultimate Alliance** (2006) | [`MUA/`](MUA/) | native D3D9 | none |
 
-dgVoodoo2 (freeware) is **bundled in [`dgVoodoo2/`](dgVoodoo2/)** and installed into a game
-folder with [`Install-dgVoodoo.ps1`](Install-dgVoodoo.ps1) — so the mod is self-contained and
-both games get the same clean window framing (centering / borderless / free cursor).
+dgVoodoo2 (freeware) is **bundled in [`dgVoodoo2/`](dgVoodoo2/)** with
+[`Install-dgVoodoo.ps1`](Install-dgVoodoo.ps1) for the **XML2** side (which needs it). **MUA runs
+native D3D9** — no wrapper; its window/cursor fixes are direct binary patches (dgVoodoo was tried
+on MUA and it reintroduced the minimize + mouse-lock, so it's intentionally not used there).
 
 Both games are hardcoded to exclusive fullscreen with no working windowed mode. The
 core fix (shared by both) is to make the engine build a genuinely **windowed D3D
@@ -49,25 +50,21 @@ community builds include it).
 .\XML2_Display_Mode.ps1 -Revert
 ```
 
-### Marvel Ultimate Alliance — copy [`MUA/`](MUA/) next to `Game.exe`, then install dgVoodoo
+### Marvel Ultimate Alliance — copy [`MUA/`](MUA/) next to `Game.exe`
 
-```powershell
-.\Install-dgVoodoo.ps1 -GamePath "C:\path\to\Marvel Ultimate Alliance"
-```
-
-This drops the bundled dgVoodoo2 D3D9 wrapper into the game folder (MUA loads it instead of
-the system `d3d9.dll`). Then use the shortcuts:
+Native D3D9, **no dgVoodoo**. Use `-Launch` (the shortcuts already do) so the script can
+size/center the window after the game opens:
 
 | Shortcut | Result |
 |---|---|
-| `Display - Borderless Fullscreen.cmd` | Desktop-res borderless, Alt-Tab friendly *(recommended)* |
-| `Display - Windowed.cmd` | Titled, centered **1280×720** window |
+| `Display - Borderless Fullscreen.cmd` | Desktop-res borderless, fills the screen, Alt-Tab friendly |
+| `Display - Windowed.cmd` | Titled, centered **1280×720** window *(recommended for the steadiest behavior)* |
 | `Display - Exclusive Fullscreen.cmd` | Stock exclusive fullscreen |
 
 ```powershell
 .\MUA_Display_Mode.ps1 -Status
-.\MUA_Display_Mode.ps1 -Mode borderless
-.\MUA_Display_Mode.ps1 -Mode windowed -Width 1600 -Height 900
+.\MUA_Display_Mode.ps1 -Mode windowed   -Launch
+.\MUA_Display_Mode.ps1 -Mode borderless -Launch
 .\MUA_Display_Mode.ps1 -Revert
 ```
 
@@ -102,13 +99,14 @@ Widescreen renders correctly (the engine computes aspect from the live resolutio
 *Quirks:* the cursor is hidden over the title bar (the game draws its own cursor); don't
 change resolution from the in-game menu while on a custom size.
 
-### Marvel Ultimate Alliance (D3D9 → bundled dgVoodoo2)
+### Marvel Ultimate Alliance (native D3D9)
 
-MUA is **D3D9**; the installer drops dgVoodoo's `D3D9.dll` into the game folder so MUA loads
-the wrapper (its `LoadLibrary("d3d9.dll")` picks up the local copy). The windowed-device fix
-targets the real D3D9 present-params (`Windowed` at **+0x20**, vs D3D8's +0x1c) so the device
-is genuinely windowed; dgVoodoo then provides centering / borderless / free-cursor exactly as
-on XML2. Same `igWin32Window` window code as XML2 (different offsets); registry key is
+MUA is **native D3D9** with no wrapper. The windowed-device fix targets the real D3D9
+present-params (`Windowed` at **+0x20**, vs D3D8's +0x1c) so the device is genuinely windowed
+(no exclusive-fullscreen minimize). Unlike XML2, MUA's **`Game.exe`** manages the cursor itself —
+it `ClipCursor`s the mouse to the window and `ShowCursor(FALSE)`s it — so those are fixed with
+direct `Game.exe` patches (free + show the cursor). Window placement (center / fill) is done by
+the script via `SetWindowPos` after launch (`-Launch`). Registry key is
 `…\Marvel Ultimate Alliance\Settings\Display\Resolution`.
 
 Avoid the in-game video menu while on a custom size (it can rebuild the device). Full offsets:

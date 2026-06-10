@@ -3,29 +3,29 @@
  MUA_Display_Mode.ps1  -  Marvel Ultimate Alliance (PC) display-mode switcher
 ================================================================================
  Adds windowed mode, borderless fullscreen, exclusive fullscreen, and any
- resolution to MUA. MUA runs through dgVoodoo2 (D3D9 wrapper) for clean window
- framing (centering / borderless / mouse), the same way the XML2 tool does.
- Run Install-dgVoodoo.ps1 first if dgVoodoo.conf isn't in the game folder.
+ resolution to MUA. MUA runs NATIVE D3D9 (no dgVoodoo) - dgVoodoo was tried and
+ it reintroduced focus-loss minimize + mouse-lock on MUA, so we keep it native.
 
  What it drives:
    1. libIGGfx.dll  -> builds a genuinely WINDOWED D3D9 device (Windowed=TRUE at
       D3DPRESENT_PARAMETERS+0x20). A windowed device is never minimized on focus loss.
-   2. libIGDisplay.dll -> window style (titled / borderless) + neutralizes the
-      "minimize/release display on focus loss" WM_ACTIVATE/WM_ACTIVATEAPP handlers.
-   3. dgVoodoo.conf -> CenterAppWindow / WindowedAttributes / CaptureMouse etc.
-      (centering, borderless framing, free cursor) -- replaces the old PowerShell
-      window-mover and cursor patch.
+   2. libIGDisplay.dll -> window style (titled / borderless), neutralizes the
+      WM_ACTIVATE/WM_ACTIVATEAPP "minimize on focus loss" handlers, and keeps the
+      OS cursor visible (ShowCursor hide->show).
+   3. Window placement -> with -Launch, starts the game and sizes/positions the
+      window (borderless = fill the screen, windowed = centered), since MUA has no
+      wrapper to do it.
    4. Registry HKCU\Software\Activision\Marvel Ultimate Alliance\Settings\Display\
       Resolution (REG_SZ "WxH") -> the render resolution.
 
  USAGE (run from the MUA folder, in PowerShell):
    .\MUA_Display_Mode.ps1 -Status
-   .\MUA_Display_Mode.ps1 -Mode borderless                 # desktop-res borderless (recommended)
-   .\MUA_Display_Mode.ps1 -Mode windowed                   # 1280x720 titled, centered window
-   .\MUA_Display_Mode.ps1 -Mode windowed -Width 1600 -Height 900
-   .\MUA_Display_Mode.ps1 -Mode fullscreen                 # stock exclusive fullscreen
-   .\MUA_Display_Mode.ps1 -Revert                          # restore DLLs + dgVoodoo.conf from backup
-
+   .\MUA_Display_Mode.ps1 -Mode borderless -Launch          # desktop-res borderless (recommended)
+   .\MUA_Display_Mode.ps1 -Mode windowed   -Launch          # 1280x720 centered window
+   .\MUA_Display_Mode.ps1 -Mode windowed   -Width 1600 -Height 900 -Launch
+   .\MUA_Display_Mode.ps1 -Mode fullscreen                  # stock exclusive fullscreen
+   .\MUA_Display_Mode.ps1 -Revert                           # restore DLLs from backup
+ (Use -Launch so the script can size/center the window after the game opens.)
  All edits are backed up to _resmod_backups\ and are fully reversible.
 ================================================================================
 #>
@@ -35,19 +35,19 @@ param(
     [string]$Mode,
     [int]$Width,
     [int]$Height,
+    [switch]$Launch,
     [switch]$Status,
     [switch]$Revert
 )
 
 $ErrorActionPreference = 'Stop'
 $GameDir   = $PSScriptRoot
+$Exe       = Join-Path $GameDir 'Game.exe'
 $Gfx       = Join-Path $GameDir 'libIGGfx.dll'
 $Disp      = Join-Path $GameDir 'libIGDisplay.dll'
-$DgVoodoo  = Join-Path $GameDir 'dgVoodoo.conf'
 $BackupDir = Join-Path $GameDir '_resmod_backups'
 $RegPath   = 'HKCU:\Software\Activision\Marvel Ultimate Alliance\Settings\Display'
 
-# --- binary patch table (libIGGfx windowed device + libIGDisplay window style/focus) ---
 function Get-Patches {
     @(
         @{ name='gfx: windowed D3D9 device (P1 skip mode-enum, refresh=0)'; file=$Gfx; off=0x5ada7
@@ -62,6 +62,16 @@ function Get-Patches {
            stock=@(0x74,0x08);             windowed=@(0xEB,0x08) }
         @{ name='disp: stay-open (WM_ACTIVATEAPP guard)';                 file=$Disp; off=0x5ede
            stock=@(0x74,0x08);             windowed=@(0xEB,0x08) }
+        @{ name='disp: OS cursor visible (ShowCursor hide->show)';        file=$Disp; off=0x4021
+           stock=@(0x00);                  windowed=@(0x01) }
+        @{ name='exe: free cursor (NOP ClipCursor confine)';              file=$Exe;  off=0x016120
+           stock=@(0x52,0xFF,0x15,0x54,0x83,0x79,0x00); windowed=@(0x90,0x90,0x90,0x90,0x90,0x90,0x90) }
+        @{ name='exe: cursor visible (device-init ShowCursor 0->1)';      file=$Exe;  off=0x31fd9b
+           stock=@(0x00);                  windowed=@(0x01) }
+        @{ name='exe: cursor visible (NOP startup ShowCursor hide #1)';   file=$Exe;  off=0x0193f3
+           stock=@(0x53,0xFF,0xD6);        windowed=@(0x90,0x90,0x90) }
+        @{ name='exe: cursor visible (NOP startup ShowCursor hide #2)';   file=$Exe;  off=0x019417
+           stock=@(0x53,0xFF,0xD6);        windowed=@(0x90,0x90,0x90) }
     )
 }
 
@@ -80,10 +90,9 @@ function Target-For($p, $mode) {
 
 function Backup-Once {
     if (-not (Test-Path $BackupDir)) { New-Item -ItemType Directory -Path $BackupDir | Out-Null }
-    foreach ($f in @($Gfx, $Disp, $DgVoodoo)) {
+    foreach ($f in @($Exe, $Gfx, $Disp)) {
         if (-not (Test-Path $f)) { continue }
-        $name = Split-Path $f -Leaf
-        $dst  = Join-Path $BackupDir "$name.orig"
+        $name = Split-Path $f -Leaf; $dst = Join-Path $BackupDir "$name.orig"
         if (-not (Test-Path $dst)) { Copy-Item $f $dst; Write-Host "  backed up $name -> _resmod_backups\$name.orig" -ForegroundColor DarkGray }
     }
 }
@@ -96,26 +105,8 @@ function Get-DesktopResolution {
     } catch { return @{ W = 1920; H = 1080 } }
 }
 
-function Write-TextAscii([string]$Path, [string]$Content) {
-    [System.IO.File]::WriteAllText($Path, $Content, [System.Text.Encoding]::ASCII)
-}
-
-function Set-DgVoodooAttr([string]$Key, [string]$Value) {
-    if (-not (Test-Path $DgVoodoo)) { return }   # no dgVoodoo installed; skip silently
-    $txt = Get-Content -Raw -Path $DgVoodoo
-    $pattern = '(?m)^(' + [regex]::Escape($Key) + '\s*=).*$'
-    if ($txt -notmatch $pattern) { return }
-    $txt = [regex]::Replace($txt, $pattern, "`$1 $Value")
-    Write-TextAscii $DgVoodoo $txt
-}
-
 function Apply-Mode([string]$mode) {
     Backup-Once
-    # Retire the old cursor-flip patch (file 0x4021): dgVoodoo CaptureMouse handles the mouse now.
-    if (Test-Path $Disp) {
-        $b = [System.IO.File]::ReadAllBytes($Disp)
-        if ($b[0x4021] -eq 0x01) { $b[0x4021] = 0x00; [System.IO.File]::WriteAllBytes($Disp, $b) }
-    }
     foreach ($g in (Get-Patches | Group-Object { $_.file })) {
         $file = $g.Name; if (-not (Test-Path $file)) { Write-Host "  (missing $file - skipped)" -ForegroundColor DarkYellow; continue }
         $bytes = [System.IO.File]::ReadAllBytes($file)
@@ -130,36 +121,6 @@ function Apply-Mode([string]$mode) {
         }
         [System.IO.File]::WriteAllBytes($file, $bytes)
     }
-    # dgVoodoo framing (mirrors the XML2 tool)
-    switch ($mode) {
-        'windowed' {
-            Set-DgVoodooAttr 'AppControlledScreenMode' 'true'
-            Set-DgVoodooAttr 'FullScreenMode'          'false'
-            Set-DgVoodooAttr 'WindowedAttributes'      ''
-            Set-DgVoodooAttr 'FullscreenAttributes'    ''
-            Set-DgVoodooAttr 'CenterAppWindow'         'true'
-            Set-DgVoodooAttr 'CaptureMouse'            'false'
-            Set-DgVoodooAttr 'FreeMouse'               'true'
-        }
-        'borderless' {
-            Set-DgVoodooAttr 'AppControlledScreenMode' 'true'
-            Set-DgVoodooAttr 'FullScreenMode'          'false'
-            Set-DgVoodooAttr 'WindowedAttributes'      'borderless,fullscreensize'
-            Set-DgVoodooAttr 'FullscreenAttributes'    ''
-            Set-DgVoodooAttr 'CenterAppWindow'         'false'
-            Set-DgVoodooAttr 'CaptureMouse'            'false'
-            Set-DgVoodooAttr 'FreeMouse'               'true'
-        }
-        'fullscreen' {
-            Set-DgVoodooAttr 'AppControlledScreenMode' 'true'
-            Set-DgVoodooAttr 'FullScreenMode'          'false'
-            Set-DgVoodooAttr 'WindowedAttributes'      ''
-            Set-DgVoodooAttr 'FullscreenAttributes'    ''
-            Set-DgVoodooAttr 'CenterAppWindow'         'false'
-            Set-DgVoodooAttr 'CaptureMouse'            'true'
-            Set-DgVoodooAttr 'FreeMouse'               'false'
-        }
-    }
 }
 
 function Set-Resolution([int]$W, [int]$H) {
@@ -167,21 +128,68 @@ function Set-Resolution([int]$W, [int]$H) {
     Set-ItemProperty -Path $RegPath -Name 'Resolution' -Value ("{0}x{1}" -f $W, $H) -Type String
 }
 
+function Get-CurrentMode {
+    if (-not (Test-Path $Disp)) { return 'unknown' }
+    $b = [System.IO.File]::ReadAllBytes($Disp)
+    if ($b[0x7896] -eq 0x90) { return 'borderless' }
+    elseif ($b[0x7895] -eq 0xCA -and $b[0x7896] -eq 0x06) { return 'windowed' }
+    elseif ($b[0x7896] -eq 0x85) { return 'fullscreen' }
+    return 'unknown'
+}
+
+# MUA has no wrapper to place the window, so after launch we find it (class "igWin32WindowClass")
+# and force the right size/position: borderless = fill the primary screen; windowed = centered.
+function Position-GameWindow([string]$mode, [int]$W, [int]$H) {
+    if ($mode -eq 'fullscreen' -or $mode -eq 'unknown') { return }
+    if (-not ('MuaW32' -as [type])) {
+        Add-Type @"
+using System; using System.Runtime.InteropServices;
+public class MuaW32 {
+  [DllImport("user32.dll", SetLastError=true)] public static extern IntPtr FindWindow(string c, string n);
+  [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr a, int x, int y, int cx, int cy, uint f);
+}
+"@
+    }
+    $desk = Get-DesktopResolution
+    Write-Host "Waiting for the game window to position it ($mode)..." -ForegroundColor DarkGray
+    $hwnd = [IntPtr]::Zero
+    $deadline = (Get-Date).AddSeconds(60)
+    while ((Get-Date) -lt $deadline) {
+        $hwnd = [MuaW32]::FindWindow('igWin32WindowClass', $null)
+        if ($hwnd -ne [IntPtr]::Zero) { break }
+        Start-Sleep -Milliseconds 400
+    }
+    if ($hwnd -eq [IntPtr]::Zero) { Write-Host "  (game window not found - not positioned; launch via this script to enable it)" -ForegroundColor DarkYellow; return }
+    # MOVE only (no resize): the window is already created at the chosen resolution; resizing it would
+    # desync the D3D9 back-buffer. SWP flags 0x45 = NOSIZE|NOZORDER|SHOWWINDOW.
+    if ($mode -eq 'borderless') { $x = 0; $y = 0 }
+    else {
+        $x = [int](($desk.W - $W) / 2); $y = [int](($desk.H - $H) / 2)
+        if ($x -lt 0) { $x = 0 }; if ($y -lt 0) { $y = 0 }
+    }
+    # Re-apply for a while to survive the game's own init repositioning (movies/legal screens).
+    for ($n = 0; $n -lt 16; $n++) {
+        [MuaW32]::SetWindowPos($hwnd, [IntPtr]::Zero, $x, $y, 0, 0, 0x45) | Out-Null
+        Start-Sleep -Milliseconds 700
+    }
+    Write-Host "  game window positioned ($mode)." -ForegroundColor Green
+}
+
+function Start-Game {
+    $exe = Join-Path $GameDir 'Game.exe'
+    if (-not (Test-Path $exe)) { $exe = Join-Path $GameDir 'MUA.exe' }
+    if (-not (Test-Path $exe)) { Write-Host "  (Game.exe/MUA.exe not found)" -ForegroundColor DarkYellow; return $false }
+    Write-Host "Launching $(Split-Path $exe -Leaf)..." -ForegroundColor Cyan
+    Start-Process -FilePath $exe -WorkingDirectory $GameDir | Out-Null
+    return $true
+}
+
 function Show-Status {
-    Write-Host "=== MUA display status ===" -ForegroundColor Cyan
+    Write-Host "=== MUA display status (native D3D9) ===" -ForegroundColor Cyan
     if (Test-Path $RegPath) {
         $res = (Get-ItemProperty -Path $RegPath -ErrorAction SilentlyContinue).Resolution
         Write-Host ("  registry    : Settings\Display\Resolution = {0}" -f $res)
     } else { Write-Host "  registry    : (Settings\Display absent)" }
-    if (Test-Path $DgVoodoo) {
-        $d = Get-Content -Raw $DgVoodoo
-        $cw = if ($d -match '(?m)^CenterAppWindow[ \t]*=[ \t]*([^\r\n]*)') { $Matches[1].Trim() } else { '?' }
-        $wa = if ($d -match '(?m)^WindowedAttributes[ \t]*=[ \t]*([^\r\n]*)') { $Matches[1].Trim() } else { '?' }
-        $cm = if ($d -match '(?m)^CaptureMouse[ \t]*=[ \t]*([^\r\n]*)') { $Matches[1].Trim() } else { '?' }
-        Write-Host ("  dgVoodoo    : CenterAppWindow={0}  CaptureMouse={1}  WindowedAttributes='{2}'" -f $cw,$cm,$wa)
-    } else {
-        Write-Host "  dgVoodoo    : NOT INSTALLED - run Install-dgVoodoo.ps1 for centering/borderless/mouse" -ForegroundColor DarkYellow
-    }
     foreach ($g in (Get-Patches | Group-Object { $_.file })) {
         $file = $g.Name; if (-not (Test-Path $file)) { continue }
         $bytes = [System.IO.File]::ReadAllBytes($file)
@@ -199,41 +207,41 @@ function Show-Status {
 
 # ---------------------------------------------------------------------------
 if ($Revert) {
-    foreach ($f in @($Gfx, $Disp, $DgVoodoo)) {
+    foreach ($f in @($Exe, $Gfx, $Disp)) {
         $name = Split-Path $f -Leaf; $src = Join-Path $BackupDir "$name.orig"
         if (Test-Path $src) { Copy-Item $src $f -Force; Write-Host "reverted $name from backup" -ForegroundColor Yellow }
     }
-    Write-Host "Note: dgVoodoo DLLs remain installed (use Install-dgVoodoo.ps1 -Uninstall to remove). Registry Resolution unchanged." -ForegroundColor DarkGray
+    Write-Host "Note: registry Resolution unchanged." -ForegroundColor DarkGray
     Show-Status; return
 }
 
-if (-not $Mode) { Show-Status; return }
+if (-not $Mode -and -not $Launch) { Show-Status; return }
 
-if (-not (Test-Path $DgVoodoo)) {
-    Write-Host "dgVoodoo.conf not found in this folder." -ForegroundColor Yellow
-    Write-Host "Run the installer first:  .\Install-dgVoodoo.ps1 -GamePath ""$GameDir""" -ForegroundColor Yellow
-    Write-Host "(Continuing anyway - the binary patches will apply, but centering/borderless/mouse won't.)" -ForegroundColor DarkYellow
-}
-
-$desk = Get-DesktopResolution
-if (-not $Width -or -not $Height) {
-    switch ($Mode) {
-        'windowed' { $Width = 1280;    $Height = 720 }
-        default    { $Width = $desk.W; $Height = $desk.H }
+if ($Mode) {
+    $desk = Get-DesktopResolution
+    if (-not $Width -or -not $Height) {
+        switch ($Mode) { 'windowed' { $Width = 1280; $Height = 720 } default { $Width = $desk.W; $Height = $desk.H } }
     }
+    Write-Host "Applying mode '$Mode' at ${Width}x${Height} ..." -ForegroundColor Cyan
+    Apply-Mode $Mode
+    Set-Resolution $Width $Height
+    switch ($Mode) {
+        'windowed'   { Write-Host "-> WINDOWED: ${Width}x${Height}, titled + centered (with -Launch), stays open when unfocused." -ForegroundColor Green }
+        'borderless' { Write-Host "-> BORDERLESS FULLSCREEN: fills the screen (with -Launch), Alt-Tab friendly." -ForegroundColor Green }
+        'fullscreen' { Write-Host "-> EXCLUSIVE FULLSCREEN at ${Width}x${Height} (stock; minimizes on Alt-Tab)." -ForegroundColor Green }
+    }
+    Write-Host ""; Show-Status; Write-Host ""
 }
 
-Write-Host "Applying mode '$Mode' at ${Width}x${Height} ..." -ForegroundColor Cyan
-Apply-Mode $Mode
-Set-Resolution $Width $Height
-
-switch ($Mode) {
-    'windowed'   { Write-Host "-> WINDOWED: a ${Width}x${Height} titled, centered window that stays open when unfocused." -ForegroundColor Green }
-    'borderless' { Write-Host "-> BORDERLESS FULLSCREEN at ${Width}x${Height} (fills the monitor, Alt-Tab friendly)." -ForegroundColor Green }
-    'fullscreen' { Write-Host "-> EXCLUSIVE FULLSCREEN at ${Width}x${Height} (stock; minimizes on Alt-Tab)." -ForegroundColor Green }
+if ($Launch) {
+    $m = if ($Mode) { $Mode } else { Get-CurrentMode }
+    $de = Get-DesktopResolution
+    $pw = if ($Width)  { $Width }  elseif ($m -eq 'windowed') { 1280 } else { $de.W }
+    $ph = if ($Height) { $Height } elseif ($m -eq 'windowed') { 720 }  else { $de.H }
+    if (Start-Game) { Position-GameWindow $m $pw $ph }
+} else {
+    Write-Host "Tip: add -Launch so the script can size/center the window after the game opens:" -ForegroundColor Cyan
+    Write-Host "     .\MUA_Display_Mode.ps1 -Mode $($Mode) -Launch" -ForegroundColor DarkGray
+    Write-Host "Revert anytime: .\MUA_Display_Mode.ps1 -Revert" -ForegroundColor Cyan
 }
-Write-Host ""
-Show-Status
-Write-Host ""
-Write-Host "Launch Game.exe (or MUA.exe) to test. Revert anytime: .\MUA_Display_Mode.ps1 -Revert" -ForegroundColor Cyan
 Write-Host "Avoid changing resolution via the in-game video menu while using a custom/windowed size." -ForegroundColor DarkGray
