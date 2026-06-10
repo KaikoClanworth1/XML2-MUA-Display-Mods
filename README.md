@@ -7,7 +7,11 @@ Alchemy-engine action-RPGs:
 | Game | Files | Renderer | dgVoodoo? |
 |---|---|---|---|
 | **X-Men Legends II** (2005) | [`XML2/`](XML2/) | D3D8 → dgVoodoo2 | required |
-| **Marvel Ultimate Alliance** (2006) | [`MUA/`](MUA/) | native D3D9 | none |
+| **Marvel Ultimate Alliance** (2006) | [`MUA/`](MUA/) | D3D9 → dgVoodoo2 | bundled (auto-install) |
+
+dgVoodoo2 (freeware) is **bundled in [`dgVoodoo2/`](dgVoodoo2/)** and installed into a game
+folder with [`Install-dgVoodoo.ps1`](Install-dgVoodoo.ps1) — so the mod is self-contained and
+both games get the same clean window framing (centering / borderless / free cursor).
 
 Both games are hardcoded to exclusive fullscreen with no working windowed mode. The
 core fix (shared by both) is to make the engine build a genuinely **windowed D3D
@@ -45,15 +49,19 @@ community builds include it).
 .\XML2_Display_Mode.ps1 -Revert
 ```
 
-### Marvel Ultimate Alliance — copy [`MUA/`](MUA/) next to `Game.exe`
+### Marvel Ultimate Alliance — copy [`MUA/`](MUA/) next to `Game.exe`, then install dgVoodoo
 
-Native D3D9, **no dgVoodoo needed**. Recommended: **borderless** (fills the screen;
-avoids the no-wrapper centering/cursor caveats below).
+```powershell
+.\Install-dgVoodoo.ps1 -GamePath "C:\path\to\Marvel Ultimate Alliance"
+```
+
+This drops the bundled dgVoodoo2 D3D9 wrapper into the game folder (MUA loads it instead of
+the system `d3d9.dll`). Then use the shortcuts:
 
 | Shortcut | Result |
 |---|---|
 | `Display - Borderless Fullscreen.cmd` | Desktop-res borderless, Alt-Tab friendly *(recommended)* |
-| `Display - Windowed.cmd` | Titled **1280×720** window *(spawns top-left — no centering without dgVoodoo)* |
+| `Display - Windowed.cmd` | Titled, centered **1280×720** window |
 | `Display - Exclusive Fullscreen.cmd` | Stock exclusive fullscreen |
 
 ```powershell
@@ -94,16 +102,16 @@ Widescreen renders correctly (the engine computes aspect from the live resolutio
 *Quirks:* the cursor is hidden over the title bar (the game draws its own cursor); don't
 change resolution from the in-game menu while on a custom size.
 
-### Marvel Ultimate Alliance (native D3D9, no wrapper)
+### Marvel Ultimate Alliance (D3D9 → bundled dgVoodoo2)
 
-MUA is **native D3D9** with no dgVoodoo, so *everything* is game-side patches. The
-windowed-device fix targets the real D3D9 present-params (`Windowed` at **+0x20**, vs
-D3D8's +0x1c). Same `igWin32Window` window code as XML2 (different offsets); registry
-key is `…\Marvel Ultimate Alliance\Settings\Display\Resolution`.
+MUA is **D3D9**; the installer drops dgVoodoo's `D3D9.dll` into the game folder so MUA loads
+the wrapper (its `LoadLibrary("d3d9.dll")` picks up the local copy). The windowed-device fix
+targets the real D3D9 present-params (`Windowed` at **+0x20**, vs D3D8's +0x1c) so the device
+is genuinely windowed; dgVoodoo then provides centering / borderless / free-cursor exactly as
+on XML2. Same `igWin32Window` window code as XML2 (different offsets); registry key is
+`…\Marvel Ultimate Alliance\Settings\Display\Resolution`.
 
-*Limitations (no dgVoodoo):* a bordered window spawns **top-left** (no centering) and
-the OS cursor is free. **Borderless at desktop resolution** sidesteps both and is the
-recommended mode. Avoid the in-game video menu while on a custom size. Full offsets:
+Avoid the in-game video menu while on a custom size (it can rebuild the device). Full offsets:
 [`research/OFFSETS-MUA.md`](research/OFFSETS-MUA.md).
 
 ---
@@ -123,3 +131,8 @@ The scripts and docs here are released under the [MIT License](LICENSE). This co
 **only** the original tooling — **not** X-Men Legends II, Marvel Ultimate Alliance, the
 Alchemy engine, or dgVoodoo2, which remain the property of their respective owners.
 These are unofficial, non-commercial fan tools with no affiliation or endorsement.
+
+**dgVoodoo2** in [`dgVoodoo2/`](dgVoodoo2/) is freeware by **Dege**
+(http://dege.freeweb.hu/dgVoodoo2/), bundled here under its redistributable license for
+convenience (see [`dgVoodoo2/About dgVoodoo.txt`](dgVoodoo2/About%20dgVoodoo.txt)). All credit
+for it goes to its author.

@@ -1,0 +1,13 @@
+﻿If you have troubles with running the game on modern systems - simply copypaste files from "dgVoodoo files" folder into the main game folder. That dgVoodoo configuration has "Fast video memory access" enabled, other settings by default. 
+
+If you want to change settings - open dgVoodooCpl.exe, go to "DirectX" tab and choose the settings you want. 
+
+Please note that dgVoodoo doesn't work on Intel graphics.
+
+The game with dgVoodoo has been tested on Windows 7 64-bit laptop with AMD video card, works with no problem.
+
+
+Visit http://dege.freeweb.hu/dgVoodoo2/ for more info about dgVoodoo.
+
+Visit https://www.pcgamingwiki.com/wiki/X-Men_Legends_II:_Rise_of_Apocalypse for more info on settings. 
+

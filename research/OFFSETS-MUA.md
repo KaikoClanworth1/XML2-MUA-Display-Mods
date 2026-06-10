@@ -60,14 +60,19 @@ flag stays set, the window is built with the fullscreen `WS_POPUP` style at (0,0
   (GFX config) defaults to 0. The exclusive device is produced downstream, which is exactly
   what the libIGGfx/libIGDisplay patches override.
 
-## Known limitations (no dgVoodoo on MUA)
+## Framing — via bundled dgVoodoo2 (D3D9 wrapper)
 
-XML2 used dgVoodoo for centering, borderless framing, and mouse confinement. MUA has none, so:
-- **Centering**: a bordered window spawns at (0,0) (top-left). True centering needs a
-  `SetWindowPos`/`MoveWindow` detour using desktop dims — not yet implemented. **Borderless
-  at desktop resolution** sidesteps this and is the recommended mode.
-- **Cursor**: the OS cursor is free; borderless@desktop makes the client fill the screen so
-  it's largely moot. (Untested edge: a sub-desktop bordered window may show a free OS cursor.)
-- **Device reset / in-game video menu**: a `Reset()` or the in-game resolution menu
-  (`changeResolutionAccepted/Refused`) may rebuild the device; set resolution via the switcher
-  and avoid the in-game video menu. Flagged for runtime testing.
+MUA is native D3D9 but the switcher now routes it through the **bundled dgVoodoo2** (drop
+`D3D9.dll` into the game folder via `Install-dgVoodoo.ps1`; MUA's `LoadLibrary("d3d9.dll")`
+picks up the local wrapper). dgVoodoo then provides what it does for XML2:
+`CenterAppWindow` (centering), `WindowedAttributes=borderless,fullscreensize` (borderless),
+`CaptureMouse=false` / `FreeMouse=true` (free cursor). The windowed-device patch above still
+runs underneath so the device is genuinely windowed (no exclusive-fullscreen minimize).
+
+This **retires** the two earlier no-dgVoodoo workarounds: the PowerShell `SetWindowPos`
+window-mover, and the `ShowCursor(FALSE)->TRUE` flip at libIGDisplay file `0x4021` (the
+switcher resets that byte to `00` if a previous version applied it).
+
+Still flagged for runtime testing: a `Reset()` or the in-game resolution menu
+(`changeResolutionAccepted/Refused`) may rebuild the device — set resolution via the switcher
+and avoid the in-game video menu.

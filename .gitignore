@@ -20,6 +20,14 @@ alchemy.ini
 xmen.ini
 build.ini
 
+# --- bundled dgVoodoo2 (freeware by Dege, redistributable) — intentionally tracked ---
+# (these negations re-include the wrapper that the *.dll/*.exe/dgVoodoo*.conf rules above ignore)
+!dgVoodoo2/
+!dgVoodoo2/*.dll
+!dgVoodoo2/*.exe
+!dgVoodoo2/*.conf
+!dgVoodoo2/*.txt
+
 # Python / editor noise
 __pycache__/
 *.pyc
