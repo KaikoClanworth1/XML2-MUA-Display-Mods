@@ -78,7 +78,39 @@ fullscreen deactivate path (minimize / release the display) → a forced window 
 
 **Patch #2 (stay open):** flip the two `je` guards from `74` → `EB` (unconditional `jmp`)
 at file offsets **`0x5c9e`** and **`0x5cbe`**, so both handlers always return and do nothing.
-Applied for windowed/borderless; restored to `74` for exclusive fullscreen.
+Applied for windowed/borderless; restored to `74` for exclusive fullscreen. *(This alone did
+NOT stop the minimize — see below. It's kept as belt‑and‑suspenders.)*
+
+## Exclusive‑fullscreen device — the REAL minimize cause (libIGGfx.dll)
+
+The window patches above weren't enough: the game still created an **exclusive‑fullscreen D3D8
+device**, which Windows/dgVoodoo minimize on focus loss (especially multi‑monitor). The device's
+"isFullScreen" state is the byte `[esi+0x180]`, read in `setDeviceParameters` (`0x1002cfe0`) to
+build `D3DPRESENT_PARAMETERS`:
+
+```
+0x1002d0c0  mov cl,[esi+0x180]; test cl,cl; sete dl; mov [eax+0x1c],edx   ; Windowed = (isFullScreen==0)
+0x1002d0dd  mov al,[esi+0x180]; test al,al; jne <fullscreen branch>       ; fullscreen branch sets BackBuffer + nonzero refresh
+```
+
+The present‑params buffer (`[esi+0x150]`) built here is the exact one passed to `IDirect3D8::CreateDevice`
+(`0x1002ce63`). The flag is set to 1 in **two** places — `createDeviceWrapper` (`0x1002cd9c`, conditional)
+and the `setDisplayMode` setter (`0x1002f062`, which **re‑applies the saved resolution at runtime**, putting
+the device back into exclusive mode after startup. This is why a one‑shot patch at the wrapper failed.)
+
+**Patch #3 (the real fix):** neutralize all three reads of `[esi+0x180]` inside `setDeviceParameters`, so
+**every** device create/reset builds windowed params. Each is a 6‑byte `mov r8,[esi+0x180]` (`8A ..`) →
+`xor r8,r8` + four `90` NOPs:
+
+| File offset | Original | Patched | Effect |
+|---|---|---|---|
+| `0x2D0C0` | `8A 8E 80 01 00 00` | `30 C9 90 90 90 90` | `xor cl,cl` → **`Windowed=TRUE`** (essential) |
+| `0x2D0DD` | `8A 86 80 01 00 00` | `30 C0 90 90 90 90` | `xor al,al` → take windowed branch; avoids the nonzero refresh rate that makes `CreateDevice` fail `D3DERR_INVALIDCALL` (essential) |
+| `0x2D09A` | `8A 86 80 01 00 00` | `30 C0 90 90 90 90` | clears a cosmetic `PresentParams.Flags` bit (optional) |
+
+A windowed device adopts the window client size for its back‑buffer and is never minimized on focus loss.
+With this in place, dgVoodoo is set to `AppControlledScreenMode=true` (follow the now‑windowed app). Applied
+for windowed/borderless; restored to stock for exclusive fullscreen.
 
 ## In‑game resolution menu (not a static list)
 

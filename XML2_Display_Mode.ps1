@@ -145,6 +145,44 @@ function Set-StayOpenOnFocusLoss([bool]$Enable) {
     [System.IO.File]::WriteAllBytes($dll, $bytes)
 }
 
+# ROOT FIX for "minimizes when I switch to another app/monitor": the engine builds an EXCLUSIVE-FULLSCREEN
+# D3D8 device whenever its fullscreen flag is set (always), and re-applies it on every resolution/mode change.
+# An exclusive device is minimized by Windows/dgVoodoo on focus loss. The fix is to neutralize all 3 reads of
+# the device isFullScreen byte ([esi+0x180]) inside libIGGfx setDeviceParameters (0x1002cfe0) so EVERY device
+# create/reset builds WINDOWED present-params (Windowed=TRUE + windowed back-buffer/refresh). Verified: the
+# present-params buffer built here is the exact one passed to IDirect3D8::CreateDevice (0x1002ce63). Both the
+# Windowed-field read (0x2d0c0) and the branch read (0x2d0dd) must be forced together, else CreateDevice fails
+# with D3DERR_INVALIDCALL (nonzero refresh rate while windowed). Each read is a 6-byte `mov r8,[esi+0x180]`
+# (8A ..) swapped for `xor r8,r8`+4 NOP. $Enable=$true => windowed device; $false => stock exclusive.
+function Set-WindowedDevice([bool]$Enable) {
+    $dll = Join-Path $GameDir 'libIGGfx.dll'
+    if (-not (Test-Path $dll)) { Write-Host "  (libIGGfx.dll not found - skipping device patch)" -ForegroundColor DarkYellow; return }
+    if (-not (Test-Path $BackupDir)) { New-Item -ItemType Directory -Path $BackupDir | Out-Null }
+    $dst = Join-Path $BackupDir 'libIGGfx.dll.orig'
+    if (-not (Test-Path $dst)) { Copy-Item $dll $dst; Write-Host "  backed up libIGGfx.dll -> _resmod_backups\libIGGfx.dll.orig" -ForegroundColor DarkGray }
+    $bytes = [System.IO.File]::ReadAllBytes($dll)
+
+    # Retire the older je-skip experiment at 0x2cd94 (only blocked one of two flag writers): force back to stock 74.
+    if ($bytes[0x2cd94] -eq 0xEB) { $bytes[0x2cd94] = 0x74 }
+
+    $sites = @(
+        @{ off=0x2d09a; stock=@(0x8A,0x86,0x80,0x01,0x00,0x00); win=@(0x30,0xC0,0x90,0x90,0x90,0x90) }  # Flags bit (cosmetic)
+        @{ off=0x2d0c0; stock=@(0x8A,0x8E,0x80,0x01,0x00,0x00); win=@(0x30,0xC9,0x90,0x90,0x90,0x90) }  # PresentParams.Windowed=TRUE
+        @{ off=0x2d0dd; stock=@(0x8A,0x86,0x80,0x01,0x00,0x00); win=@(0x30,0xC0,0x90,0x90,0x90,0x90) }  # take windowed branch
+    )
+    foreach ($s in $sites) {
+        $o = $s.off; $isStock = $true; $isWin = $true
+        for ($i=0; $i -lt 6; $i++) {
+            if ($bytes[$o+$i] -ne $s.stock[$i]) { $isStock = $false }
+            if ($bytes[$o+$i] -ne $s.win[$i])   { $isWin   = $false }
+        }
+        if (-not ($isStock -or $isWin)) { throw ("libIGGfx.dll: unexpected bytes at 0x{0:x} - aborting device patch (offset mismatch?)" -f $o) }
+        $tgt = if ($Enable) { $s.win } else { $s.stock }
+        for ($i=0; $i -lt 6; $i++) { $bytes[$o+$i] = $tgt[$i] }
+    }
+    [System.IO.File]::WriteAllBytes($dll, $bytes)
+}
+
 function Show-Status {
     Write-Host "=== XML2 display status ===" -ForegroundColor Cyan
     if (Test-Path $Alchemy) {
@@ -168,7 +206,8 @@ function Show-Status {
         $fa = if ($d -match '(?m)^FullscreenAttributes[ \t]*=[ \t]*([^\r\n]*)') { $Matches[1].Trim() } else { '?' }
         $ex = if ($d -match '(?m)^ExtraEnumeratedResolutions[ \t]*=[ \t]*([^\r\n]*)') { $Matches[1].Trim() } else { '?' }
         $cw = if ($d -match '(?m)^CenterAppWindow[ \t]*=[ \t]*([^\r\n]*)') { $Matches[1].Trim() } else { '?' }
-        Write-Host ("  dgVoodoo    : AppControlledScreenMode={0}  FullScreenMode={1}  (false/false = forced window)" -f $ac,$fm)
+        $cm = if ($d -match '(?m)^CaptureMouse[ \t]*=[ \t]*([^\r\n]*)') { $Matches[1].Trim() } else { '?' }
+        Write-Host ("  dgVoodoo    : AppControlledScreenMode={0}  FullScreenMode={1}  CaptureMouse={2}" -f $ac,$fm,$cm)
         Write-Host ("                WindowedAttributes='{0}'  FullscreenAttributes='{1}'  CenterAppWindow={2}" -f $wa,$fa,$cw)
         Write-Host ("                ExtraEnumeratedResolutions='{0}'" -f $ex)
     }
@@ -180,13 +219,19 @@ function Show-Status {
         Write-Host ("  libIGDisplay: window style = {0}" -f $style)
         Write-Host ("                focus loss  = {0}" -f $focus)
     }
+    $gfx = Join-Path $GameDir 'libIGGfx.dll'
+    if (Test-Path $gfx) {
+        $g = [System.IO.File]::ReadAllBytes($gfx)
+        $dev = if ($g[0x2d0c0] -eq 0x30) { 'windowed device (patched, no exclusive FS)' } elseif ($g[0x2d0c0] -eq 0x8A) { 'exclusive-fullscreen device (stock)' } else { 'unknown' }
+        Write-Host ("  libIGGfx    : D3D device = {0}" -f $dev)
+    }
     $desk = Get-DesktopResolution
     Write-Host ("  desktop     : {0}x{1}" -f $desk.W, $desk.H) -ForegroundColor DarkGray
 }
 
 # ---------------------------------------------------------------------------
 if ($Revert) {
-    foreach ($f in @($Alchemy, $DgVoodoo, (Join-Path $GameDir 'libIGDisplay.dll'))) {
+    foreach ($f in @($Alchemy, $DgVoodoo, (Join-Path $GameDir 'libIGDisplay.dll'), (Join-Path $GameDir 'libIGGfx.dll'))) {
         $name = Split-Path $f -Leaf
         $src  = Join-Path $BackupDir "$name.orig"
         if (Test-Path $src) { Copy-Item $src $f -Force; Write-Host "reverted $name from backup" -ForegroundColor Yellow }
@@ -222,14 +267,17 @@ switch ($Mode) {
     'windowed' {
         # The game hardcodes fullscreen (XMen2.exe 0x5facb1 forces the flag to 1) and ignores
         # alchemy.ini fullScreen, so we make dgVoodoo OVERRIDE the screen mode and force a window.
-        Set-AlchemyFullScreen $false $Width $Height       # harmless; kept consistent
-        Set-DgVoodooAttr 'AppControlledScreenMode' 'false' # dgVoodoo decides the mode, not the game
-        Set-DgVoodooAttr 'FullScreenMode'          'false' # ...and that mode is WINDOWED
-        Set-DgVoodooAttr 'WindowedAttributes'      ''       # let the (now bordered) game window show its caption
-        Set-DgVoodooAttr 'FullscreenAttributes'    'fake'   # harmless
+        Set-WindowedDevice $true                            # ROOT: real windowed D3D device (no exclusive FS -> no minimize)
+        Set-AlchemyFullScreen $false $Width $Height         # harmless; kept consistent
+        Set-DgVoodooAttr 'AppControlledScreenMode' 'true'  # device is genuinely windowed now -> let the app drive it
+        Set-DgVoodooAttr 'FullScreenMode'          'false'
+        Set-DgVoodooAttr 'WindowedAttributes'      ''       # normal window; the libIGDisplay patch supplies the caption
+        Set-DgVoodooAttr 'FullscreenAttributes'    ''       # no fake-fullscreen emulation (that was minimizing on focus loss)
         Set-DgVoodooAttr 'CenterAppWindow'         'true'   # un-stick from top-left (game hardcodes pos 0,0)
+        Set-DgVoodooAttr 'CaptureMouse'            'false'  # show/free the OS cursor (incl. over the title bar)
+        Set-DgVoodooAttr 'FreeMouse'               'true'   # physical mouse can leave the window (multi-monitor)
         Set-WindowBorder $true                              # patch libIGDisplay style -> titled, movable window
-        Set-StayOpenOnFocusLoss $true                       # don't minimize/freeze when you click another window
+        Set-StayOpenOnFocusLoss $true                       # belt-and-suspenders: skip the game's fullscreen focus handlers
         Set-Resolution $Width $Height
         Write-Host "-> WINDOWED: a ${Width}x${Height} titled, centered window that stays open when unfocused." -ForegroundColor Green
         if ($Width -ge $desk.W -or $Height -ge $desk.H) {
@@ -238,27 +286,33 @@ switch ($Mode) {
     }
     'borderless' {
         # Force windowed under the hood, then present it borderless at full screen size.
+        Set-WindowedDevice $true                            # real windowed D3D device -> Alt-Tab safe, no minimize
         Set-AlchemyFullScreen $true $Width $Height
-        Set-DgVoodooAttr 'AppControlledScreenMode' 'false'
+        Set-DgVoodooAttr 'AppControlledScreenMode' 'true'
         Set-DgVoodooAttr 'FullScreenMode'          'false'
         Set-DgVoodooAttr 'WindowedAttributes'      'borderless,fullscreensize'  # no border, fills monitor
-        Set-DgVoodooAttr 'FullscreenAttributes'    'fake'
+        Set-DgVoodooAttr 'FullscreenAttributes'    ''
         Set-DgVoodooAttr 'CenterAppWindow'         'false'
-        Set-WindowBorder $false                             # restore borderless game window style
-        Set-StayOpenOnFocusLoss $true                       # Alt-Tab friendly: don't minimize on focus loss
+        Set-DgVoodooAttr 'CaptureMouse'            'false'
+        Set-DgVoodooAttr 'FreeMouse'               'true'
+        Set-WindowBorder $false                             # borderless game window style (dgVoodoo also strips it)
+        Set-StayOpenOnFocusLoss $true
         Set-Resolution $Width $Height
         Write-Host "-> BORDERLESS FULLSCREEN at ${Width}x${Height} (Alt-Tab friendly, no exclusive mode)." -ForegroundColor Green
     }
     'fullscreen' {
         # Let the game drive a real exclusive-fullscreen request and have dgVoodoo honor it.
+        Set-WindowedDevice $false                           # stock exclusive-fullscreen D3D device
         Set-AlchemyFullScreen $true $Width $Height
         Set-DgVoodooAttr 'AppControlledScreenMode' 'true'   # game controls -> real exclusive fullscreen
         Set-DgVoodooAttr 'FullScreenMode'          'false'
         Set-DgVoodooAttr 'FullscreenAttributes'    ''        # real exclusive (not fake)
         Set-DgVoodooAttr 'WindowedAttributes'      ''
         Set-DgVoodooAttr 'CenterAppWindow'         'false'
+        Set-DgVoodooAttr 'CaptureMouse'            'true'    # confine cursor to the game in fullscreen
+        Set-DgVoodooAttr 'FreeMouse'               'false'
         Set-WindowBorder $false                             # restore borderless WS_POPUP for exclusive FS
-        Set-StayOpenOnFocusLoss $false                      # stock fullscreen focus handling (minimize on Alt-Tab)
+        Set-StayOpenOnFocusLoss $false                      # stock fullscreen focus handling
         Set-Resolution $Width $Height
         Write-Host "-> EXCLUSIVE FULLSCREEN at ${Width}x${Height} (must be a mode your GPU enumerates)." -ForegroundColor Green
         Write-Host "   (If it black-screens, that resolution isn't enumerated - use -AddMenuResolutions or 'borderless'.)" -ForegroundColor DarkYellow

@@ -84,27 +84,29 @@ all three so they stay consistent:
 | What | Layer that owns it | Mechanism |
 |---|---|---|
 | **Render resolution** (both modes) | The **game** | Reads registry `HKCU\Software\Activision\X-Men Legends 2\Settings\Display\Resolution` (REG_SZ `"WxH"`) **unconditionally** at startup and renders natively at that size. dgVoodoo just passes the size through → sharp, **not** an upscale. |
-| **Windowed vs fullscreen** | **dgVoodoo** | The game is hardcoded to demand exclusive fullscreen, so we set `[DirectX] AppControlledScreenMode=false` + `[General] FullScreenMode=false`, which makes dgVoodoo **override** the request and present in a desktop window. The game never knows. |
+| **Windowed vs fullscreen** (+ no minimize on focus loss) | a **patch** in `libIGGfx.dll` + dgVoodoo | The game is hardcoded to build an **exclusive‑fullscreen** D3D device, which Windows/dgVoodoo minimize whenever it loses focus (esp. multi‑monitor). The tool patches `setDeviceParameters` so the device is created **windowed** (`Windowed=TRUE`) on every create/reset, then lets dgVoodoo follow the app (`AppControlledScreenMode=true`). A genuinely windowed device never minimizes on focus loss. |
 | **Title bar / border / centering** | a 4‑byte **patch** + dgVoodoo | The game builds its window with a borderless `WS_POPUP` style pinned to (0,0). For windowed mode the tool patches that style in `libIGDisplay.dll` to a titled, non‑resizable style and sets dgVoodoo `CenterAppWindow=true`. Borderless mode uses dgVoodoo `WindowedAttributes=borderless,fullscreensize`. |
-| **Stay open when unfocused** | two 1‑byte **patches** | Because the game thinks it's fullscreen, its `WM_ACTIVATE`/`WM_ACTIVATEAPP` handlers minimize/release the display when you click away. The tool flips the two `je` guards (`74`→`EB`) in `libIGDisplay.dll` so those handlers do nothing — the window keeps running. Applied for windowed/borderless, restored for exclusive fullscreen. |
+| **Mouse** | dgVoodoo | dgVoodoo `CaptureMouse` is turned **off** in windowed/borderless so the cursor is free (multi‑monitor friendly). *Known minor quirk:* the game hides the OS cursor and draws its own inside the game area, so the cursor is invisible over the Windows title bar — you can still click/drag it. |
 
 ### Why this split?
 
-- **dgVoodoo is essential for windowed/borderless** because the game refuses to be
-  windowed on its own (the relevant instruction in `XMen2.exe` forces the fullscreen
-  flag back on every launch). Only the wrapper underneath it can win that argument.
+- **The minimize fix is a *device* patch, not a window trick.** It's tempting to just
+  force a window with dgVoodoo, but the game still creates an *exclusive‑fullscreen*
+  D3D device underneath — and an exclusive device is minimized by Windows the instant
+  it loses focus. The real fix is to make the engine build a **windowed** device, so
+  there's no exclusive mode to minimize. (The game re‑applies its resolution at
+  runtime through a separate code path, so the patch is placed in `setDeviceParameters`
+  itself — it holds across every device create/reset. Guarded against offset drift.)
 - **The game owns resolution**, not dgVoodoo. Setting the registry makes the game
-  *render* natively at your chosen size. If you let dgVoodoo scale a 1024×768 image
-  instead, you'd get a blurry upscale; this avoids that.
-- **The DLL patch only adds a title bar**, which dgVoodoo can't do (it can remove a
-  border but not add one). It's 4 bytes, guarded against offset drift, applied only
-  in windowed mode, and reverted automatically for the other modes.
+  *render* natively at your chosen size — sharp, not a blurry dgVoodoo upscale.
+- **The title‑bar patch only adds a caption**, which dgVoodoo can't do (it can remove
+  a border but not add one). Applied only in windowed mode, reverted for the others.
 
 ### Per‑mode summary
 
-- **Windowed** — dgVoodoo forces a window + DLL patch adds the caption + dgVoodoo
-  centers it + registry sets the (native) size.
-- **Borderless** — dgVoodoo forces a window, strips the border, and stretches to the
+- **Windowed** — `libIGGfx` patch builds a windowed device (no minimize) + `libIGDisplay`
+  patch adds the caption + dgVoodoo centers it & frees the mouse + registry sets the size.
+- **Borderless** — windowed device + dgVoodoo strips the border and stretches to the
   monitor; registry = native resolution.
 - **Exclusive fullscreen** — dgVoodoo steps back (`AppControlledScreenMode=true`) and
   honors the game's own real fullscreen request (still DX8→DX11 underneath).
