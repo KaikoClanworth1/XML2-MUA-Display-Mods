@@ -1,155 +1,125 @@
-# XML2 Windowed / Borderless / Resolution mod
+# Alchemy-engine display mods — X-Men Legends II & Marvel Ultimate Alliance
 
-A small, fully‑reversible tool that adds **windowed mode**, **borderless fullscreen**,
-**exclusive fullscreen**, and **any render resolution** to **X‑Men Legends II (PC, 2005)**.
+Small, fully-reversible tools that add **windowed mode**, **borderless fullscreen**,
+**exclusive fullscreen**, and **any render resolution** to two Raven/Activision
+Alchemy-engine action-RPGs:
 
-The game itself is hardcoded to exclusive fullscreen at a fixed list of 4:3
-resolutions and has no working windowed mode. This tool fixes that by driving the
-three layers the game actually uses — without redistributing any game files.
+| Game | Files | Renderer | dgVoodoo? |
+|---|---|---|---|
+| **X-Men Legends II** (2005) | [`XML2/`](XML2/) | D3D8 → dgVoodoo2 | required |
+| **Marvel Ultimate Alliance** (2006) | [`MUA/`](MUA/) | native D3D9 | none |
 
-> **This repo contains no game content.** It ships only a PowerShell script, three
-> `.cmd` shortcuts, and docs. It edits *your own* installed copy (and backs up
-> everything first). You must already own X‑Men Legends II and have it running.
+Both games are hardcoded to exclusive fullscreen with no working windowed mode. The
+core fix (shared by both) is to make the engine build a genuinely **windowed D3D
+device** — an exclusive-fullscreen device gets minimized by Windows the moment it
+loses focus; a windowed one does not — plus a small window-style patch for the title
+bar / borderless frame. Everything is applied to *your own* installed copy and is
+fully reversible (automatic backups in `_resmod_backups\`).
 
----
-
-## Requirements
-
-- **X‑Men Legends II (PC)** installed and working.
-- **dgVoodoo2** already set up in the game folder (the usual modern‑PC fix —
-  `D3D8.dll`, `dgVoodoo.conf`, etc. next to `XMen2.exe`). Most modern installs and
-  the marvelmods.com community builds already include it. This tool relies on it
-  for the windowed/borderless framing.
-- Windows PowerShell 5.1+ (built into Windows).
+> **This repo contains no game content** — only PowerShell scripts, `.cmd` shortcuts,
+> and docs. You must already own the games.
 
 ---
 
-## Install
+## Install & use
 
-1. Download this repo (green **Code → Download ZIP**, or `git clone`).
-2. Copy these files into your **X‑Men Legends II folder** (the one containing
-   `XMen2.exe`):
-   - `XML2_Display_Mode.ps1`
-   - `Display - Windowed.cmd`
-   - `Display - Borderless Fullscreen.cmd`
-   - `Display - Exclusive Fullscreen.cmd`
+Copy your game's folder contents next to its EXE, then double-click a `Display - *.cmd`
+(or run the `.ps1`). `-Status` shows the current state; `-Revert` undoes everything.
 
-That's it. (`research/` is optional — see [How it works](#how-it-works).)
+### X-Men Legends II — copy [`XML2/`](XML2/) next to `XMen2.exe`
 
----
-
-## Use
-
-**One‑click:** double‑click one of the shortcuts, then launch `XMen2.exe`:
+Requires **dgVoodoo2** already in the game folder (the usual modern-PC fix; most
+community builds include it).
 
 | Shortcut | Result |
 |---|---|
-| `Display - Windowed.cmd` | A titled, centered, movable **1280×720 window** |
-| `Display - Borderless Fullscreen.cmd` | Covers the whole monitor, **no border**, Alt‑Tab friendly |
-| `Display - Exclusive Fullscreen.cmd` | True **exclusive fullscreen** (lowest latency, best for G‑Sync/FreeSync) |
-
-**Custom resolution / advanced** (PowerShell, run from the game folder):
+| `Display - Windowed.cmd` | Titled, centered, movable **1280×720** window |
+| `Display - Borderless Fullscreen.cmd` | Fills the monitor, no border, Alt-Tab friendly |
+| `Display - Exclusive Fullscreen.cmd` | True exclusive fullscreen |
 
 ```powershell
-.\XML2_Display_Mode.ps1 -Status                                   # show current settings
-.\XML2_Display_Mode.ps1 -Mode windowed   -Width 1600 -Height 900  # any window size
-.\XML2_Display_Mode.ps1 -Mode borderless -Width 2560 -Height 1440 # any borderless res
-.\XML2_Display_Mode.ps1 -Mode fullscreen                          # native exclusive fullscreen
+.\XML2_Display_Mode.ps1 -Status
+.\XML2_Display_Mode.ps1 -Mode windowed -Width 1600 -Height 900
+.\XML2_Display_Mode.ps1 -Mode borderless
 .\XML2_Display_Mode.ps1 -AddMenuResolutions 1920x1080,2560x1440   # add modes to the in-game menu
-.\XML2_Display_Mode.ps1 -Revert                                   # undo everything
+.\XML2_Display_Mode.ps1 -Revert
 ```
 
-If PowerShell blocks the script, the `.cmd` shortcuts already bypass that; to run
-the `.ps1` directly use `powershell -ExecutionPolicy Bypass -File .\XML2_Display_Mode.ps1 ...`.
+### Marvel Ultimate Alliance — copy [`MUA/`](MUA/) next to `Game.exe`
+
+Native D3D9, **no dgVoodoo needed**. Recommended: **borderless** (fills the screen;
+avoids the no-wrapper centering/cursor caveats below).
+
+| Shortcut | Result |
+|---|---|
+| `Display - Borderless Fullscreen.cmd` | Desktop-res borderless, Alt-Tab friendly *(recommended)* |
+| `Display - Windowed.cmd` | Titled **1280×720** window *(spawns top-left — no centering without dgVoodoo)* |
+| `Display - Exclusive Fullscreen.cmd` | Stock exclusive fullscreen |
+
+```powershell
+.\MUA_Display_Mode.ps1 -Status
+.\MUA_Display_Mode.ps1 -Mode borderless
+.\MUA_Display_Mode.ps1 -Mode windowed -Width 1600 -Height 900
+.\MUA_Display_Mode.ps1 -Revert
+```
+
+If PowerShell blocks a script, the `.cmd` shortcuts already bypass that; or run
+`powershell -ExecutionPolicy Bypass -File .\<script>.ps1 ...`.
 
 ---
 
 ## How it works
 
-X‑Men Legends II runs on Raven's Alchemy engine and talks to **DirectX 8**, which is
-wrapped to modern Direct3D 11 by **dgVoodoo2**. The render stack:
+Both games run Raven's Alchemy engine. The **shared core fix:** the game is hardcoded
+to build an **exclusive-fullscreen** D3D device, which Windows minimizes the instant it
+loses focus. The tools patch the engine's `setDeviceParameters` so the device is created
+**windowed** (`Windowed=TRUE`, refresh rate 0) on every create/reset — a genuinely
+windowed device never minimizes. A separate `libIGDisplay.dll` patch sets the window
+style (titled or borderless) and neutralizes the game's own "minimize on focus loss"
+handlers. Resolution is the game's own native render, set via a registry value.
 
-```
-GPU + Windows (Direct3D 11)
-      ▲
-dgVoodoo2          ← the "D3D8.dll" in the game folder is dgVoodoo, not Microsoft's.
-                     Translates the game's DirectX 8 calls to D3D11.
-      ▲
-XMen2.exe + Alchemy DLLs (libIGGfx, libIGDisplay, …)   ← the game
-```
+### X-Men Legends II (D3D8 + dgVoodoo2)
 
-Three separate things are controlled at three different layers — the tool drives
-all three so they stay consistent:
+XML2 talks to **DirectX 8**, wrapped to D3D11 by **dgVoodoo2** (the `D3D8.dll` in the
+folder is dgVoodoo, not Microsoft's).
 
-| What | Layer that owns it | Mechanism |
+| What | Owner | Mechanism |
 |---|---|---|
-| **Render resolution** (both modes) | The **game** | Reads registry `HKCU\Software\Activision\X-Men Legends 2\Settings\Display\Resolution` (REG_SZ `"WxH"`) **unconditionally** at startup and renders natively at that size. dgVoodoo just passes the size through → sharp, **not** an upscale. |
-| **Windowed vs fullscreen** (+ no minimize on focus loss) | a **patch** in `libIGGfx.dll` + dgVoodoo | The game is hardcoded to build an **exclusive‑fullscreen** D3D device, which Windows/dgVoodoo minimize whenever it loses focus (esp. multi‑monitor). The tool patches `setDeviceParameters` so the device is created **windowed** (`Windowed=TRUE`) on every create/reset, then lets dgVoodoo follow the app (`AppControlledScreenMode=true`). A genuinely windowed device never minimizes on focus loss. |
-| **Title bar / border / centering** | a 4‑byte **patch** + dgVoodoo | The game builds its window with a borderless `WS_POPUP` style pinned to (0,0). For windowed mode the tool patches that style in `libIGDisplay.dll` to a titled, non‑resizable style and sets dgVoodoo `CenterAppWindow=true`. Borderless mode uses dgVoodoo `WindowedAttributes=borderless,fullscreensize`. |
-| **Mouse** | dgVoodoo | dgVoodoo `CaptureMouse` is turned **off** in windowed/borderless so the cursor is free (multi‑monitor friendly). *Known minor quirk:* the game hides the OS cursor and draws its own inside the game area, so the cursor is invisible over the Windows title bar — you can still click/drag it. |
+| Render resolution | the game | registry `…\X-Men Legends 2\Settings\Display\Resolution` (REG_SZ), read at startup; native, not upscaled |
+| Windowed device (no minimize) | `libIGGfx.dll` patch | force `D3DPRESENT_PARAMETERS.Windowed=TRUE` (D3D8 field at +0x1c) |
+| Title bar / borderless / centering / mouse | `libIGDisplay.dll` patch + dgVoodoo | window-style patch + `CenterAppWindow` / `WindowedAttributes` / `CaptureMouse` |
 
-### Why this split?
+Widescreen renders correctly (the engine computes aspect from the live resolution; true
+16:9 is undistorted Hor+). Full offsets: [`research/OFFSETS-XML2.md`](research/OFFSETS-XML2.md).
+*Quirks:* the cursor is hidden over the title bar (the game draws its own cursor); don't
+change resolution from the in-game menu while on a custom size.
 
-- **The minimize fix is a *device* patch, not a window trick.** It's tempting to just
-  force a window with dgVoodoo, but the game still creates an *exclusive‑fullscreen*
-  D3D device underneath — and an exclusive device is minimized by Windows the instant
-  it loses focus. The real fix is to make the engine build a **windowed** device, so
-  there's no exclusive mode to minimize. (The game re‑applies its resolution at
-  runtime through a separate code path, so the patch is placed in `setDeviceParameters`
-  itself — it holds across every device create/reset. Guarded against offset drift.)
-- **The game owns resolution**, not dgVoodoo. Setting the registry makes the game
-  *render* natively at your chosen size — sharp, not a blurry dgVoodoo upscale.
-- **The title‑bar patch only adds a caption**, which dgVoodoo can't do (it can remove
-  a border but not add one). Applied only in windowed mode, reverted for the others.
+### Marvel Ultimate Alliance (native D3D9, no wrapper)
 
-### Per‑mode summary
+MUA is **native D3D9** with no dgVoodoo, so *everything* is game-side patches. The
+windowed-device fix targets the real D3D9 present-params (`Windowed` at **+0x20**, vs
+D3D8's +0x1c). Same `igWin32Window` window code as XML2 (different offsets); registry
+key is `…\Marvel Ultimate Alliance\Settings\Display\Resolution`.
 
-- **Windowed** — `libIGGfx` patch builds a windowed device (no minimize) + `libIGDisplay`
-  patch adds the caption + dgVoodoo centers it & frees the mouse + registry sets the size.
-- **Borderless** — windowed device + dgVoodoo strips the border and stretches to the
-  monitor; registry = native resolution.
-- **Exclusive fullscreen** — dgVoodoo steps back (`AppControlledScreenMode=true`) and
-  honors the game's own real fullscreen request (still DX8→DX11 underneath).
-
-Widescreen renders correctly: the engine computes camera aspect and the 2D‑UI scale
-from the live resolution, so true 16:9 is undistorted (Hor+) with a correct HUD.
-(Ultrawide beyond 16:9 is untested and may shift some HUD art.)
-
-Exact reverse‑engineered offsets are documented in
-[`research/OFFSETS.md`](research/OFFSETS.md), and `research/pe_strings.py` is the
-helper used to find/verify them.
-
----
-
-## Caveats
-
-- After setting a custom/windowed size, **don't change resolution from the in‑game
-  Display Options menu** — picking a 4:3 entry rewrites the registry value. If that
-  happens, just re‑run a `Display - *.cmd`.
-- **Exclusive fullscreen** needs a resolution your GPU actually enumerates. If it
-  black‑screens, use `-AddMenuResolutions` or pick **borderless**.
-- The windowed window is intentionally **non‑resizable** (the engine has no
-  resize handler; dragging the corner would garble the image).
+*Limitations (no dgVoodoo):* a bordered window spawns **top-left** (no centering) and
+the OS cursor is free. **Borderless at desktop resolution** sidesteps both and is the
+recommended mode. Avoid the in-game video menu while on a custom size. Full offsets:
+[`research/OFFSETS-MUA.md`](research/OFFSETS-MUA.md).
 
 ---
 
 ## Uninstall / revert
 
-```powershell
-.\XML2_Display_Mode.ps1 -Revert
-```
-
-This restores `alchemy.ini`, `dgVoodoo.conf`, and `libIGDisplay.dll` from the
-automatic backups in `_resmod_backups\`. The registry `Resolution` value is left as
-last set (change it via any mode, or in the in‑game menu). You can also delete the
-four files you copied in.
+Run `-Revert` from the game folder (`.\XML2_Display_Mode.ps1 -Revert` or
+`.\MUA_Display_Mode.ps1 -Revert`). It restores the patched DLLs (and, for XML2,
+`alchemy.ini` / `dgVoodoo.conf`) from `_resmod_backups\`. The registry `Resolution`
+value is left as last set. You can also just delete the files you copied in.
 
 ---
 
 ## License
 
-The scripts and docs in this repo are released under the [MIT License](LICENSE).
-This covers **only** the original tooling here — **not** X‑Men Legends II, the
+The scripts and docs here are released under the [MIT License](LICENSE). This covers
+**only** the original tooling — **not** X-Men Legends II, Marvel Ultimate Alliance, the
 Alchemy engine, or dgVoodoo2, which remain the property of their respective owners.
-"X‑Men Legends" is a trademark of its respective owners; this is an unofficial,
-non‑commercial fan tool with no affiliation or endorsement.
+These are unofficial, non-commercial fan tools with no affiliation or endorsement.
