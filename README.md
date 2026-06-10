@@ -1,5 +1,12 @@
 # Alchemy-engine display mods — X-Men Legends II & Marvel Ultimate Alliance
 
+> ⚠️ **Modder's resource — work-in-progress, not a final product.** This is an **alpha**. It
+> directly patches game binaries, has only been tested on a few setups, and is shared mainly as a
+> **reference for other modders** — the full reverse-engineered offsets, addresses, and byte
+> patches are documented in [`research/`](research/) so you can learn from, verify, or build on it.
+> Expect rough edges (e.g. on MUA the OS cursor may show alongside the game's own in menus). Always
+> keep the automatic backups; everything is reversible with `-Revert`. Use at your own risk.
+
 Small, fully-reversible tools that add **windowed mode**, **borderless fullscreen**,
 **exclusive fullscreen**, and **any render resolution** to two Raven/Activision
 Alchemy-engine action-RPGs:
